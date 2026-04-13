@@ -1,5 +1,8 @@
 import sqlite3
 import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telethon import TelegramClient, events
@@ -24,6 +27,19 @@ CREATE TABLE IF NOT EXISTS media (
 ''')
 conn.commit()
 
+# 🌐 Dummy Web Server (for Railway)
+def run_web_server():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+
+    server = HTTPServer(("0.0.0.0", 8080), Handler)
+    print("🌐 Web server running on port 8080")
+    server.serve_forever()
+
+
 # 🔍 SEARCH COMMAND
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -32,7 +48,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyword = " ".join(context.args).lower()
 
-    print("SEARCHING FOR:", keyword)
+    print("🔍 SEARCHING FOR:", keyword)
 
     cur.execute(
         "SELECT message_id, channel_id FROM media WHERE text LIKE ? LIMIT 10",
@@ -41,7 +57,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     results = cur.fetchall()
 
-    print("RESULTS FOUND:", results)
+    print("📊 RESULTS FOUND:", results)
 
     if not results:
         await update.message.reply_text("No results found")
@@ -51,7 +67,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for message_id, channel_id in results:
         try:
-            print("FORWARDING:", message_id, "FROM", channel_id)
+            print("📤 SENDING:", message_id, "FROM", channel_id)
 
             msg = await telethon_client.get_messages(channel_id, ids=message_id)
 
@@ -64,10 +80,10 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(1)
 
         except Exception as e:
-            print("ERROR SENDING:", e)
+            print("❌ ERROR SENDING:", e)
 
 
-# 🔁 AUTO INDEX (every 5 min)
+# 🔁 AUTO INDEX (every 5 minutes)
 async def auto_index():
     while True:
         print("🔄 Running auto index...")
@@ -102,7 +118,7 @@ async def auto_index():
         await asyncio.sleep(300)
 
 
-# ⚡ REAL-TIME INDEX
+# ⚡ REAL-TIME INDEXING
 @telethon_client.on(events.NewMessage(chats=DATABASE_CHANNELS))
 async def handler(event):
     msg = event.message
@@ -116,7 +132,7 @@ async def handler(event):
         if msg.file and msg.file.name:
             text += " " + msg.file.name.lower()
 
-        print("⚡ NEW MEDIA DETECTED:", msg.id, "IN", event.chat_id)
+        print("⚡ NEW MEDIA:", msg.id, "IN", event.chat_id)
 
         cur.execute(
             "INSERT OR REPLACE INTO media VALUES (?, ?, ?)",
@@ -130,6 +146,9 @@ async def handler(event):
 # 🚀 MAIN
 def main():
     telethon_client.start()
+
+    # Start dummy web server (for Railway)
+    threading.Thread(target=run_web_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("search", search))
